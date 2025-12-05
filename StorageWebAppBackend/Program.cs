@@ -2,55 +2,50 @@ using StorageWebAppBackend.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using DotNetEnv;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Load User Secrets (from AppData\Roaming\Microsoft\UserSecrets\<UserSecretsId>\secrets.json)
-builder.Configuration.AddUserSecrets<Program>();
+Console.WriteLine("Loading .env file...");
+Env.Load(); // Loads all variables from .env into Environment.GetEnvironmentVariable()
 
-// Add controllers
+// --- Load Environment Variables ---
+string cosmosEndpoint = Environment.GetEnvironmentVariable("COSMOS_DB_ENDPOINT");
+string cosmosKey = Environment.GetEnvironmentVariable("COSMOS_DB_KEY");
+string databaseId = Environment.GetEnvironmentVariable("COSMOS_DB_DATABASE_ID");
+string usersContainerId = Environment.GetEnvironmentVariable("COSMOS_USERS_CONTAINER");
+string photosContainerId = Environment.GetEnvironmentVariable("COSMOS_PHOTOS_CONTAINER");
+
+string jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
+
+// --- Validation ---
+if (string.IsNullOrWhiteSpace(cosmosEndpoint) || string.IsNullOrWhiteSpace(cosmosKey))
+{
+    throw new Exception("Cosmos DB environment variables missing. Check .env file.");
+}
+
+if (string.IsNullOrWhiteSpace(jwtSecret))
+{
+    throw new Exception("JWT_SECRET missing in .env file.");
+}
+
+// --- Services ---
 builder.Services.AddControllers();
 
-// Add CORS
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowReactDev",
-        policy =>
-        {
-            policy.WithOrigins("http://localhost:3001") // your React app origin
-                  .AllowAnyHeader()
-                  .AllowAnyMethod();
-        });
+    options.AddPolicy("AllowReactDev", policy => policy
+        .WithOrigins("http://localhost:3000")
+        .AllowAnyHeader()
+        .AllowAnyMethod());
 });
 
-// Load CosmosDb section
-var cosmosSection = builder.Configuration.GetSection("CosmosDb");
-string databaseId = cosmosSection["DatabaseId"];
-string usersContainerId = cosmosSection["ContainerId"];
-string photosContainerId = cosmosSection["ContainerId"];
+// Register Cosmos DB service
+builder.Services.AddSingleton(provider =>
+    new DbService(databaseId, photosContainerId, usersContainerId)
+);
 
-// Safety check
-if (string.IsNullOrWhiteSpace(databaseId) || string.IsNullOrWhiteSpace(usersContainerId))
-{
-    throw new InvalidOperationException(
-        "CosmosDb configuration is missing. Make sure DatabaseId and usersContainerId are set in User Secrets."
-    );
-}
-// Safety check
-if (string.IsNullOrWhiteSpace(databaseId) || string.IsNullOrWhiteSpace(photosContainerId))
-{
-    throw new InvalidOperationException(
-        "CosmosDb configuration is missing. Make sure DatabaseId and photosContainerId are set in User Secrets."
-    );
-}
-
-// Register DbService as singleton
-builder.Services.AddSingleton<DbService>(provider =>
-    new DbService(databaseId, usersContainerId, photosContainerId));
-
-// --- JWT Configuration ---
-string jwtSecret = builder.Configuration["Jwt:Key"]; // Replace with secure key
-
+// --- JWT ---
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -60,8 +55,8 @@ builder.Services.AddAuthentication(options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
     {
-        ValidateIssuer = false, // can be true if you want to restrict issuer
-        ValidateAudience = false, // can be true if you want to restrict audience
+        ValidateIssuer = false,
+        ValidateAudience = false,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
@@ -69,18 +64,14 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddAuthorization();
-// --- End JWT Configuration ---
 
+// --- App ---
 var app = builder.Build();
 
-// Middleware
 app.UseRouting();
 app.UseCors("AllowReactDev");
-
-// Enable authentication & authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
 app.Run();
