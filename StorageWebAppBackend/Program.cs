@@ -44,6 +44,8 @@ builder.Services.AddCors(options =>
 builder.Services.AddSingleton(provider =>
     new DbService(databaseId, photosContainerId, usersContainerId)
 );
+// Register Image service
+builder.Services.AddSingleton<ImageService>();
 
 // --- JWT ---
 builder.Services.AddAuthentication(options =>

@@ -75,7 +75,9 @@ namespace StorageWebAppBackend.Controllers
                 {
                     user.id,
                     user.email,
-                    user.name
+                    user.name,
+                    user.Banner,
+                    user.ProfileImage
                 }
             });
         }

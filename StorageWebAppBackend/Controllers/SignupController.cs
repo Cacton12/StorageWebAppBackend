@@ -48,7 +48,9 @@ namespace StorageWebAppBackend.Controllers
                 email = email,
                 name = name,
                 passwordHash = passwordHash,
-                dateCreated = DateTime.UtcNow.ToString("o") // ISO 8601 format
+                dateCreated = DateTime.UtcNow.ToString("o"), // ISO 8601 format
+                Banner = null,
+                ProfileImage = null,
             };
 
             // Save to Cosmos DB
@@ -60,7 +62,9 @@ namespace StorageWebAppBackend.Controllers
                 createdUser.id,
                 createdUser.email,
                 createdUser.name,
-                createdUser.dateCreated
+                createdUser.dateCreated,
+                createdUser.Banner,
+                createdUser.ProfileImage,
             });
         }
     }

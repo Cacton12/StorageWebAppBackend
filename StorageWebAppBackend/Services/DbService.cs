@@ -15,54 +15,56 @@ namespace StorageWebAppBackend.Services
     public class DbService
     {
         private readonly CosmosClient _cosmosClient;
-        private readonly Container _usersContainer;
         private readonly Container _photosContainer;
+        private readonly Container _usersContainer;
 
         private readonly IAmazonS3 _s3Client;
         private readonly string _r2BucketName;
 
         public DbService(string databaseId, string photosContainerId, string usersContainerId)
         {
-            var cosmosConfig = LoadCosmosConfig();
-            var r2Config = LoadR2Config();
+            var cosmos = LoadCosmosConfig();
+            var r2 = LoadR2Config();
 
-            // Initialize Cosmos DB
-            _cosmosClient = new CosmosClient(cosmosConfig.AccountEndpoint, cosmosConfig.AccountKey);
+            // COSMOS
+            _cosmosClient = new CosmosClient(cosmos.AccountEndpoint, cosmos.AccountKey);
             _photosContainer = _cosmosClient.GetContainer(databaseId, photosContainerId);
             _usersContainer = _cosmosClient.GetContainer(databaseId, usersContainerId);
-            Console.WriteLine($"Cosmos DB initialized. DB: {databaseId}, PhotosContainer: {photosContainerId}, UsersContainer: {usersContainerId}");
 
-            // Initialize R2 S3 client
-            _r2BucketName = r2Config.BucketName;
-            var credentials = new BasicAWSCredentials(r2Config.AccessKey, r2Config.SecretKey);
+            // R2 (S3 compatible)
+            _r2BucketName = r2.BucketName;
+            var credentials = new BasicAWSCredentials(r2.AccessKey, r2.SecretKey);
+
             _s3Client = new AmazonS3Client(
                 credentials,
                 new AmazonS3Config
                 {
-                    ServiceURL = r2Config.ServiceUrl,
+                    ServiceURL = r2.ServiceUrl,
                     ForcePathStyle = true,
                     AuthenticationRegion = "auto"
-                });
-            Console.WriteLine($"R2 S3 client initialized. Bucket: {_r2BucketName}");
+                }
+            );
         }
 
-        #region Config Loaders
+        // ---------------------------------------------------------
+        // CONFIG
+        // ---------------------------------------------------------
+
         private CosmosDbConfig LoadCosmosConfig()
         {
             DotNetEnv.Env.Load();
-            var endpoint = Environment.GetEnvironmentVariable("COSMOS_DB_ENDPOINT");
-            var key = Environment.GetEnvironmentVariable("COSMOS_DB_KEY");
-            Console.WriteLine($"Loaded Cosmos endpoint: {endpoint}, Key length: {key?.Length}");
+
             return new CosmosDbConfig
             {
-                AccountEndpoint = endpoint,
-                AccountKey = key
+                AccountEndpoint = Environment.GetEnvironmentVariable("COSMOS_DB_ENDPOINT"),
+                AccountKey = Environment.GetEnvironmentVariable("COSMOS_DB_KEY")
             };
         }
 
         private R2Config LoadR2Config()
         {
             DotNetEnv.Env.Load();
+
             return new R2Config
             {
                 AccessKey = Environment.GetEnvironmentVariable("R2_ACCESS_KEY"),
@@ -71,197 +73,214 @@ namespace StorageWebAppBackend.Services
                 ServiceUrl = Environment.GetEnvironmentVariable("R2_SERVICE_URL")
             };
         }
-        #endregion
 
-        #region Photo Upload
-        public async Task<string> UploadFileToR2Async(string key, Stream fileStream, string contentType)
+        // ---------------------------------------------------------
+        // UPLOAD PHOTO
+        // ---------------------------------------------------------
+
+        public async Task<PhotoUploadResult> UploadPhotoAsync(
+            string userId,
+            string fileName,
+            Stream fileStream,
+            string contentType,
+            string title = null,
+            string desc = null)
         {
-            if (fileStream == null || fileStream.Length == 0)
-                throw new ArgumentException("File stream is null or empty", nameof(fileStream));
+            var photoKey = await UploadFileToR2Async(fileName, fileStream, contentType);
 
-            key = Uri.EscapeDataString(key.Replace(" ", "_"));
-
-            try
-            {
-                byte[] fileBytes;
-                using (var ms = new MemoryStream())
-                {
-                    await fileStream.CopyToAsync(ms);
-                    fileBytes = ms.ToArray();
-                }
-
-                var request = new PutObjectRequest
-                {
-                    BucketName = _r2BucketName,
-                    Key = key,
-                    InputStream = new MemoryStream(fileBytes),
-                    ContentType = contentType,
-                    DisablePayloadSigning = true
-                };
-
-                var response = await _s3Client.PutObjectAsync(request);
-                if (response.HttpStatusCode != System.Net.HttpStatusCode.OK)
-                    throw new Exception($"R2 upload failed with status code: {response.HttpStatusCode}");
-
-                Console.WriteLine($"Uploaded file to R2: {key}");
-                return key;
-            }
-            catch (AmazonS3Exception s3Ex)
-            {
-                Console.WriteLine($"Amazon S3 exception: {s3Ex.Message}");
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Unexpected error uploading to R2: {ex}");
-                throw;
-            }
-        }
-
-        public async Task<string> UploadPhotoAsync(string userId, string fileName, Stream fileStream, string contentType)
-        {
-            try
-            {
-                var photoKey = await UploadFileToR2Async(fileName, fileStream, contentType);
-                await SavePhotoMetadataAsync(userId, photoKey, fileName);
-                return photoKey;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error uploading photo for user {userId}: {ex}");
-                throw;
-            }
-        }
-
-        public string GetPhotoUrl(string key, int expiresInMinutes = 60)
-        {
-            try
-            {
-                var request = new GetPreSignedUrlRequest
-                {
-                    BucketName = _r2BucketName,
-                    Key = key,
-                    Expires = DateTime.UtcNow.AddMinutes(expiresInMinutes)
-                };
-
-                return _s3Client.GetPreSignedURL(request);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error generating pre-signed URL for {key}: {ex}");
-                return null;
-            }
-        }
-        #endregion
-
-        #region Metadata & Queries
-        public async Task SavePhotoMetadataAsync(string userId, string photoKey, string fileName)
-        {
-            var photoDoc = new
+            var photo = new PhotoMetadata
             {
                 id = Guid.NewGuid().ToString(),
-                userId,
-                photoKey,
-                fileName,
+                userId = userId,
+                photoKey = photoKey,
+                fileName = fileName,
+                title = title ?? fileName,
+                desc = desc ?? "Uploaded by user",
                 dateCreated = DateTime.UtcNow
             };
 
+            await _photosContainer.CreateItemAsync(photo, new PartitionKey(userId));
+
+            return new PhotoUploadResult
+            {
+                id = photo.id,
+                photoKey = photo.photoKey,
+                url = GetPhotoUrl(photo.photoKey),
+                title = photo.title,
+                desc = photo.desc,
+                dateCreated = photo.dateCreated
+            };
+        }
+
+        public async Task<string> UploadFileToR2Async(string key, Stream stream, string contentType)
+        {
+            if (stream == null || stream.Length == 0)
+                throw new Exception("Empty file stream");
+
+            key = Uri.EscapeDataString(key.Replace(" ", "_"));
+
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+
+            var request = new PutObjectRequest
+            {
+                BucketName = _r2BucketName,
+                Key = key,
+                InputStream = new MemoryStream(ms.ToArray()),
+                ContentType = contentType,
+                DisablePayloadSigning = true
+            };
+
+            var response = await _s3Client.PutObjectAsync(request);
+
+            if (response.HttpStatusCode != System.Net.HttpStatusCode.OK)
+                throw new Exception("R2 upload failed");
+
+            return key;
+        }
+
+        public string GetPhotoUrl(string key, int expiresMinutes = 60)
+        {
             try
             {
-                var response = await _photosContainer.CreateItemAsync(photoDoc, new PartitionKey(userId));
-                Console.WriteLine($"Saved photo metadata: {photoKey} for user {userId}");
+                return _s3Client.GetPreSignedURL(new GetPreSignedUrlRequest
+                {
+                    BucketName = _r2BucketName,
+                    Key = key,
+                    Expires = DateTime.UtcNow.AddMinutes(expiresMinutes)
+                });
             }
-            catch (CosmosException ce)
+            catch { return null; }
+        }
+
+        // ---------------------------------------------------------
+        // FETCH PHOTOS
+        // ---------------------------------------------------------
+
+        public async Task<List<PhotoUploadResult>> GetUserPhotosAsync(string userId, int expiresMinutes = 60)
+        {
+            var results = new List<PhotoUploadResult>();
+
+            var query = new QueryDefinition("SELECT * FROM c WHERE c.userId = @uid")
+                .WithParameter("@uid", userId);
+
+            using var iterator = _photosContainer.GetItemQueryIterator<PhotoMetadata>(query);
+
+            while (iterator.HasMoreResults)
             {
-                Console.WriteLine($"Cosmos DB error while saving photo metadata. StatusCode: {ce.StatusCode}, SubStatus: {ce.SubStatusCode}, Message: {ce.Message}");
-                throw;
+                foreach (var photo in await iterator.ReadNextAsync())
+                {
+                    results.Add(new PhotoUploadResult
+                    {
+                        id = photo.id,
+                        photoKey = photo.photoKey,
+                        url = GetPhotoUrl(photo.photoKey, expiresMinutes),
+                        title = photo.title,
+                        desc = photo.desc,
+                        dateCreated = photo.dateCreated
+                    });
+                }
             }
-            catch (Exception ex)
+
+            return results;
+        }
+
+        // ---------------------------------------------------------
+        // EDIT / UPDATE PHOTO
+        // ---------------------------------------------------------
+
+        public async Task<PhotoMetadata?> GetPhotoByIdAsync(string photoId, string userId)
+        {
+            try
             {
-                Console.WriteLine($"Unexpected error while saving photo metadata: {ex}");
-                throw;
+                var response = await _photosContainer.ReadItemAsync<PhotoMetadata>(
+                    photoId,
+                    new PartitionKey(userId)
+                );
+                return response.Resource;
+            }
+            catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return null;
             }
         }
 
-        public async Task<List<string>> GetUserPhotoUrlsAsync(string userId, int expiresInMinutes = 60)
+        public async Task UpdatePhotoAsync(PhotoMetadata photo)
         {
-            var urls = new List<string>();
-            var query = new QueryDefinition("SELECT c.photoKey FROM c WHERE c.userId = @userId")
-                .WithParameter("@userId", userId);
-
-            var iterator = _photosContainer.GetItemQueryIterator<dynamic>(query);
-
-            try
-            {
-                while (iterator.HasMoreResults)
-                {
-                    var response = await iterator.ReadNextAsync();
-                    foreach (var item in response)
-                    {
-                        string key = item.photoKey;
-                        urls.Add(GetPhotoUrl(key, expiresInMinutes));
-                    }
-                }
-            }
-            catch (CosmosException ce)
-            {
-                Console.WriteLine($"Cosmos DB query error: StatusCode: {ce.StatusCode}, Message: {ce.Message}");
-                throw;
-            }
-
-            return urls;
+            await _photosContainer.ReplaceItemAsync(
+                photo,
+                photo.id,
+                new PartitionKey(photo.userId)
+            );
         }
-        #endregion
 
-        #region User Management
-        public async Task<Users> GetUserByEmailAsync(string email)
+        // ---------------------------------------------------------
+        // DELETE PHOTO
+        // ---------------------------------------------------------
+
+        public async Task DeletePhotoAsync(string userId, string photoId, string photoKey)
         {
-            var query = new QueryDefinition("SELECT * FROM c WHERE c.email = @email")
-                .WithParameter("@email", email);
-
-            var iterator = _usersContainer.GetItemQueryIterator<Users>(query);
-
-            try
+            // delete file
+            await _s3Client.DeleteObjectAsync(new DeleteObjectRequest
             {
-                while (iterator.HasMoreResults)
-                {
-                    var response = await iterator.ReadNextAsync();
-                    if (response.Any())
-                    {
-                        Console.WriteLine($"Found user by email: {email}");
-                        return response.First();
-                    }
-                }
-            }
-            catch (CosmosException ce)
+                BucketName = _r2BucketName,
+                Key = photoKey
+            });
+
+            // delete metadata
+            await _photosContainer.DeleteItemAsync<PhotoMetadata>(
+                photoId,
+                new PartitionKey(userId)
+            );
+        }
+
+        // ---------------------------------------------------------
+        // USER MANAGEMENT
+        // ---------------------------------------------------------
+
+        public async Task<Users?> GetUserByEmailAsync(string email)
+        {
+            var query = new QueryDefinition("SELECT * FROM c WHERE c.email = @e")
+                .WithParameter("@e", email);
+
+            using var iterator = _usersContainer.GetItemQueryIterator<Users>(query);
+
+            while (iterator.HasMoreResults)
             {
-                Console.WriteLine($"Cosmos DB error querying user: StatusCode: {ce.StatusCode}, Message: {ce.Message}");
-                throw;
+                var batch = await iterator.ReadNextAsync();
+                if (batch.Any())
+                    return batch.First();
             }
 
-            Console.WriteLine($"User not found: {email}");
             return null;
         }
 
         public async Task<Users> CreateUserAsync(Users user)
         {
+            var response = await _usersContainer.CreateItemAsync(user, new PartitionKey(user.email));
+            return response.Resource;
+        }
+        public async Task UpdateUserAsync(Users user)
+        {
+            await _usersContainer.UpsertItemAsync(user, new PartitionKey(user.email));
+        }
+        public async Task<bool> FileExistsInR2Async(string key)
+        {
             try
             {
-                var response = await _usersContainer.CreateItemAsync(user, new PartitionKey(user.email));
-                Console.WriteLine($"Created user: {user.email}");
-                return response.Resource;
+                var request = new Amazon.S3.Model.GetObjectMetadataRequest
+                {
+                    BucketName = _r2BucketName,
+                    Key = Uri.EscapeDataString(key.Replace(" ", "_"))
+                };
+
+                var response = await _s3Client.GetObjectMetadataAsync(request);
+                return true; // file exists
             }
-            catch (CosmosException ce)
+            catch (Amazon.S3.AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                Console.WriteLine($"Cosmos DB error creating user: StatusCode: {ce.StatusCode}, Message: {ce.Message}");
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Unexpected error creating user: {ex}");
-                throw;
+                return false; // file does not exist
             }
         }
-        #endregion
     }
 }

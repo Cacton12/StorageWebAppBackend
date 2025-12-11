@@ -25,40 +25,28 @@ namespace StorageWebAppBackend.Controllers
                 {
                     success = false,
                     message = "User ID is required.",
-                    images = new List<string>()
+                    images = new List<object>()
                 });
 
             try
             {
-                var urls = await _dbService.GetUserPhotoUrlsAsync(userId, expiresInMinutes: 60);
-
-                if (urls == null || urls.Count == 0)
-                {
-                    return Ok(new
-                    {
-                        success = true,
-                        message = "No images found for this user.",
-                        images = new List<string>()
-                    });
-                }
+                var photos = await _dbService.GetUserPhotosAsync(userId, expiresMinutes: 60);
 
                 return Ok(new
                 {
                     success = true,
-                    message = $"Found {urls.Count} image(s).",
-                    images = urls
+                    message = photos.Count == 0 ? "No images found." : $"Found {photos.Count} image(s).",
+                    images = photos
                 });
             }
             catch (System.Exception ex)
             {
-                // Log the exception internally (e.g., to file or monitoring system)
                 Console.WriteLine($"Error retrieving images for user {userId}: {ex}");
-
                 return StatusCode(500, new
                 {
                     success = false,
                     message = "An error occurred while retrieving images. Please try again later.",
-                    images = new List<string>()
+                    images = new List<object>()
                 });
             }
         }
