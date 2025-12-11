@@ -1,5 +1,4 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using StorageWebAppBackend.Models;
 using StorageWebAppBackend.Services;
@@ -19,16 +18,25 @@ namespace StorageWebAppBackend.Controllers
         private readonly DbService _dbService;
         private readonly string _jwtSecret;
 
-        public LoginController(DbService dbService, IConfiguration config)
+        public LoginController(DbService dbService)
         {
             _dbService = dbService;
-            _jwtSecret = config["Jwt:Key"]; // LOADED FROM USER SECRETS
+
+            // Load JWT secret from environment variable (.env)
+            _jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
+
+            if (string.IsNullOrWhiteSpace(_jwtSecret))
+            {
+                throw new Exception("JWT_SECRET is not set in the environment or .env file.");
+            }
         }
 
         // POST: /api/login
         [HttpPost]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
+            Console.WriteLine("password: " + request.password + " email: " + request.email);
+
             if (string.IsNullOrEmpty(request.email) || string.IsNullOrEmpty(request.password))
                 return BadRequest(new { message = "Email and password are required." });
 

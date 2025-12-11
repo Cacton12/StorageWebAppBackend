@@ -6,10 +6,11 @@ using DotNetEnv;
 
 var builder = WebApplication.CreateBuilder(args);
 
-Console.WriteLine("Loading .env file...");
-Env.Load(); // Loads all variables from .env into Environment.GetEnvironmentVariable()
+// Load .env file into environment variables
+Console.WriteLine("Loading .env...");
+Env.Load();
 
-// --- Load Environment Variables ---
+// ---- Load variables from .env ----
 string cosmosEndpoint = Environment.GetEnvironmentVariable("COSMOS_DB_ENDPOINT");
 string cosmosKey = Environment.GetEnvironmentVariable("COSMOS_DB_KEY");
 string databaseId = Environment.GetEnvironmentVariable("COSMOS_DB_DATABASE_ID");
@@ -17,37 +18,45 @@ string usersContainerId = Environment.GetEnvironmentVariable("COSMOS_USERS_CONTA
 string photosContainerId = Environment.GetEnvironmentVariable("COSMOS_PHOTOS_CONTAINER");
 
 string jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
+Console.WriteLine("JWT_SECRET: " + jwtSecret);
 
-// --- Validation ---
-if (string.IsNullOrWhiteSpace(cosmosEndpoint) || string.IsNullOrWhiteSpace(cosmosKey))
+
+// ---- Validation ----
+if (string.IsNullOrWhiteSpace(cosmosEndpoint) ||
+    string.IsNullOrWhiteSpace(cosmosKey) ||
+    string.IsNullOrWhiteSpace(databaseId) ||
+    string.IsNullOrWhiteSpace(usersContainerId) ||
+    string.IsNullOrWhiteSpace(photosContainerId))
 {
-    throw new Exception("Cosmos DB environment variables missing. Check .env file.");
+    throw new Exception("Missing one or more Cosmos DB environment variables. Check your .env file.");
 }
 
 if (string.IsNullOrWhiteSpace(jwtSecret))
 {
-    throw new Exception("JWT_SECRET missing in .env file.");
+    throw new Exception("Missing JWT_SECRET in .env file.");
 }
 
-// --- Services ---
+// ---- Register Services ----
 builder.Services.AddControllers();
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowReactDev", policy => policy
-        .WithOrigins("http://localhost:3000")
-        .AllowAnyHeader()
-        .AllowAnyMethod());
+    options.AddPolicy("AllowReactDev", policy =>
+        policy.WithOrigins("http://localhost:3000")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+    );
 });
 
-// Register Cosmos DB service
+// Cosmos DB service
 builder.Services.AddSingleton(provider =>
     new DbService(databaseId, photosContainerId, usersContainerId)
 );
-// Register Image service
+
+// Image service
 builder.Services.AddSingleton<ImageService>();
 
-// --- JWT ---
+// ---- JWT Auth Setup ----
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -67,13 +76,12 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
-// --- App ---
 var app = builder.Build();
 
 app.UseRouting();
 app.UseCors("AllowReactDev");
 app.UseAuthentication();
 app.UseAuthorization();
-
 app.MapControllers();
+
 app.Run();
