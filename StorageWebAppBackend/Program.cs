@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using DotNetEnv;
+using Microsoft.Azure.Cosmos;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,7 +20,6 @@ string photosContainerId = Environment.GetEnvironmentVariable("COSMOS_PHOTOS_CON
 
 string jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
 Console.WriteLine("JWT_SECRET: " + jwtSecret);
-
 
 // ---- Validation ----
 if (string.IsNullOrWhiteSpace(cosmosEndpoint) ||
@@ -39,6 +39,7 @@ if (string.IsNullOrWhiteSpace(jwtSecret))
 // ---- Register Services ----
 builder.Services.AddControllers();
 
+// CORS for local React dev
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactDev", policy =>
@@ -48,10 +49,20 @@ builder.Services.AddCors(options =>
     );
 });
 
-// Cosmos DB service
+// ---- CosmosDB Optimization ----
+var cosmosOptions = new CosmosClientOptions
+{
+    ConnectionMode = ConnectionMode.Gateway,        // Or Direct for faster performance
+    MaxRetryAttemptsOnRateLimitedRequests = 5,
+    MaxRetryWaitTimeOnRateLimitedRequests = TimeSpan.FromSeconds(5)
+};
+
+// Register optimized DbService singleton
 builder.Services.AddSingleton(provider =>
-    new DbService(databaseId, photosContainerId, usersContainerId)
-);
+{
+    var client = new CosmosClient(cosmosEndpoint, cosmosKey, cosmosOptions);
+    return new DbService(databaseId, photosContainerId, usersContainerId);
+});
 
 // Image service
 builder.Services.AddSingleton<ImageService>();
@@ -75,6 +86,9 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddAuthorization();
+
+// Lambda hosting without API Gateway
+builder.Services.AddAWSLambdaHosting(LambdaEventSource.HttpApi);
 
 var app = builder.Build();
 

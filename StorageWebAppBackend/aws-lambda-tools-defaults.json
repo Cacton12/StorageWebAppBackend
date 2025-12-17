@@ -1,0 +1,20 @@
+{
+  "region": "us-east-2",
+  "profile": "default",
+  "configuration": "Release",
+  "framework": "net8.0",
+  "function-name": "PhotoStorageApp",
+  "package-type": "Zip",
+  "function-handler": "StorageWebAppBackend",
+  "function-memory-size": 256,
+  "function-role": "arn:aws:iam::538784191731:role/service-role/StorageAppBackendLambdaRole",
+  "function-timeout": 60,
+  "function-runtime": "dotnet8",
+  "function-architecture": "x86_64",
+  "function-subnets": "",
+  "function-security-groups": "",
+  "tracing-mode": "PassThrough",
+  "environment-variables": "\u0022COSMOS_DB_KEY\u0022=\u0022GQmocowbqvVBASY94eAcDuCVNqJ3HqSQrhdLZpwjrv9uTRj5DSpY2HN7b60wgZHVlNpJ5bYoRLtXACDbE8TjLQ==\u0022;\u0022R2_SERVICE_URL\u0022=\u0022https://bfcf2578652652dbc44adfada7bd5460.r2.cloudflarestorage.com/photo-storage-app\u0022;\u0022COSMOS_PHOTOS_CONTAINER\u0022=\u0022Photos\u0022;\u0022COSMOS_DB_DATABASE_ID\u0022=\u0022StorageAppDB\u0022;\u0022JWT_SECRET\u0022=\u00229LYyaZ^SrUFtHk7S^7.-/[m-|%l\u002B8OwbjX\u003Eyc:aD2qZw9#-)^\u003EhZlG@i@=Cl$\u0022;\u0022R2_ACCESS_KEY\u0022=\u0022d01214ae075fc1264ada65a98120c626\u0022;\u0022COSMOS_USERS_CONTAINER\u0022=\u0022Users\u0022;\u0022COSMOS_DB_ENDPOINT\u0022=\u0022https://storagewebapp.documents.azure.com:443/\u0022;\u0022R2_API_TOKEN\u0022=\u0022swpdm-45kjQ9Kr3aJjHf74rfcNahdfQgr9D_LF6J\u0022;\u0022R2_BUCKET_NAME\u0022=\u0022photo-storage-app\u0022;\u0022R2_SECRET_KEY\u0022=\u0022e19242e5a381a2339c3db6b1870a16087562c5b12bb76c48b93c36ec6377f9dc\u0022",
+  "image-tag": "",
+  "function-description": ""
+}

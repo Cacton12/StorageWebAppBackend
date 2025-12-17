@@ -40,7 +40,9 @@ namespace StorageWebAppBackend.Controllers
                     userId,
                     uniqueFileName,
                     resizedStream,
-                    file.ContentType
+                    file.ContentType,
+                    title,
+                    desc
                 );
 
 
