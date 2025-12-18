@@ -4,9 +4,6 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /app
 
-# Copy solution file (if you have one)
-COPY StorageWebAppBackend.sln ./
-
 # Copy ONLY the real Web API project files first (for caching)
 COPY StorageWebAppBackend/StorageWebAppBackend.csproj StorageWebAppBackend/
 
