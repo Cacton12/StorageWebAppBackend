@@ -22,21 +22,15 @@ namespace StorageWebAppBackend.Controllers
         {
             _dbService = dbService;
 
-            // Load JWT secret from environment variable (.env)
             _jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
-
             if (string.IsNullOrWhiteSpace(_jwtSecret))
-            {
                 throw new Exception("JWT_SECRET is not set in the environment or .env file.");
-            }
         }
 
         // POST: /api/login
         [HttpPost]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-            Console.WriteLine("password: " + request.password + " email: " + request.email);
-
             if (string.IsNullOrEmpty(request.email) || string.IsNullOrEmpty(request.password))
                 return BadRequest(new { message = "Email and password are required." });
 
@@ -44,20 +38,17 @@ namespace StorageWebAppBackend.Controllers
 
             // Get user by email
             var user = await _dbService.GetUserByEmailAsync(email);
-
             if (user == null)
                 return Unauthorized(new { message = "Invalid email or password." });
 
             // Validate password
             bool passwordMatch = BCrypt.Net.BCrypt.Verify(request.password, user.passwordHash);
-
             if (!passwordMatch)
                 return Unauthorized(new { message = "Invalid email or password." });
 
             // Generate JWT
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.UTF8.GetBytes(_jwtSecret);
-
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(new[]
@@ -71,11 +62,19 @@ namespace StorageWebAppBackend.Controllers
                     SecurityAlgorithms.HmacSha256Signature
                 )
             };
-
             var token = tokenHandler.CreateToken(tokenDescriptor);
             string jwt = tokenHandler.WriteToken(token);
 
-            // Return token + user info
+            // Generate signed URLs using DbService
+            string profileUrl = !string.IsNullOrEmpty(user.ProfileImage)
+                ? _dbService.GetPhotoUrl(user.ProfileImage)
+                : null;
+
+            string bannerUrl = !string.IsNullOrEmpty(user.Banner)
+                ? _dbService.GetPhotoUrl(user.Banner)
+                : null;
+
+            // Return token + user info + signed URLs
             return Ok(new
             {
                 token = jwt,
@@ -84,8 +83,8 @@ namespace StorageWebAppBackend.Controllers
                     user.id,
                     user.email,
                     user.name,
-                    user.Banner,
-                    user.ProfileImage
+                    profileImage = profileUrl,
+                    banner = bannerUrl
                 }
             });
         }

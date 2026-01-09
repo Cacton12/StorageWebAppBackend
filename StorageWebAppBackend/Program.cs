@@ -4,16 +4,21 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.Azure.Cosmos;
 using System.Text;
 
+// ===============================
+// LOAD .ENV FIRST
+// ===============================
+DotNetEnv.Env.Load();
+
 var builder = WebApplication.CreateBuilder(args);
 
-// ===============================
-// ENVIRONMENT
-// ===============================
-var isProduction = builder.Environment.IsProduction();
+// ? Allow IConfiguration to read environment variables
+builder.Configuration.AddEnvironmentVariables();
 
 // ===============================
 // ENV VARIABLES
 // ===============================
+var isProduction = builder.Environment.IsProduction();
+
 string cosmosEndpoint = Environment.GetEnvironmentVariable("COSMOS_DB_ENDPOINT");
 string cosmosKey = Environment.GetEnvironmentVariable("COSMOS_DB_KEY");
 string databaseId = Environment.GetEnvironmentVariable("COSMOS_DB_DATABASE_ID");
@@ -35,7 +40,6 @@ builder.WebHost.ConfigureKestrel(options =>
 // ===============================
 builder.Services.AddControllers();
 
-// CORS (lock this down later)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -45,7 +49,7 @@ builder.Services.AddCors(options =>
 });
 
 // ===============================
-// COSMOS DB (Conditional)
+// COSMOS DB
 // ===============================
 bool cosmosConfigured =
     !string.IsNullOrWhiteSpace(cosmosEndpoint) &&
@@ -56,44 +60,43 @@ bool cosmosConfigured =
 
 if (cosmosConfigured)
 {
-    Console.WriteLine("[Startup] Cosmos DB configured.");
+    builder.Services.AddSingleton(new CosmosClient(
+        cosmosEndpoint,
+        cosmosKey,
+        new CosmosClientOptions
+        {
+            ConnectionMode = ConnectionMode.Gateway
+        }));
 
-    var cosmosOptions = new CosmosClientOptions
-    {
-        ConnectionMode = ConnectionMode.Gateway,
-        MaxRetryAttemptsOnRateLimitedRequests = 5,
-        MaxRetryWaitTimeOnRateLimitedRequests = TimeSpan.FromSeconds(5)
-    };
-
-    builder.Services.AddSingleton(_ =>
+    builder.Services.AddSingleton(
         new DbService(databaseId, photosContainerId, usersContainerId));
+
+    Console.WriteLine("? Cosmos DB registered");
 }
 else
 {
-    Console.WriteLine("[Startup WARNING] Cosmos DB env vars missing.");
+    Console.WriteLine("?? Cosmos DB env vars missing");
 
     if (isProduction)
     {
-        throw new Exception("Cosmos DB must be configured in production.");
+        throw new Exception("Cosmos DB configuration is required in production.");
     }
+
+    builder.Services.AddSingleton<DbService>(_ =>
+        throw new InvalidOperationException(
+            "DbService requested but Cosmos is not configured."));
 }
 
 // ===============================
-// IMAGE SERVICE
+// APP SERVICES
 // ===============================
 builder.Services.AddSingleton<ImageService>();
+builder.Services.AddScoped<EmailService>();   // ? Mailgun
 
 // ===============================
 // JWT AUTH
 // ===============================
-if (string.IsNullOrWhiteSpace(jwtSecret))
-{
-    if (isProduction)
-        throw new Exception("JWT_SECRET is required in production.");
-
-    Console.WriteLine("[Startup WARNING] JWT disabled (no JWT_SECRET).");
-}
-else
+if (!string.IsNullOrWhiteSpace(jwtSecret))
 {
     builder.Services
         .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -114,10 +117,13 @@ else
 }
 
 // ===============================
-// PIPELINE
+// BUILD APP
 // ===============================
 var app = builder.Build();
 
+// ===============================
+// PIPELINE
+// ===============================
 app.UseRouting();
 app.UseCors("AllowFrontend");
 

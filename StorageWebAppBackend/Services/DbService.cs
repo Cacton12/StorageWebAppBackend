@@ -2,6 +2,7 @@
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.Azure.Cosmos;
 using StorageWebAppBackend.Models;
 using System;
@@ -109,6 +110,57 @@ namespace StorageWebAppBackend.Services
                 title = photo.title,
                 desc = photo.desc,
                 dateCreated = photo.dateCreated
+            };
+        }
+        public async Task<UserImageUploadResult> UploadUserImageAsync(
+            Users user,
+            string fileName,
+            Stream fileStream,
+            bool isProfileImage,
+            bool isBannerImage,
+            string contentType,
+            string title = null,
+            string desc = null)
+        {
+            if (user == null) throw new ArgumentNullException(nameof(user));
+
+            string? profileKey = null;
+            string? bannerKey = null;
+
+            // Upload profile image if requested
+            if (isProfileImage)
+            {
+                profileKey = await UploadFileToR2Async(fileName, fileStream, contentType);
+                user.ProfileImage = profileKey;
+                await _usersContainer.UpsertItemAsync(user, new PartitionKey(user.email));
+            }
+            else
+            {
+                // Use existing profile image if not uploading a new one
+                profileKey = user.ProfileImage;
+            }
+
+            // Upload banner image if requested
+            if (isBannerImage)
+            {
+                bannerKey = await UploadFileToR2Async(fileName, fileStream, contentType);
+                user.Banner = bannerKey;
+                await _usersContainer.UpsertItemAsync(user, new PartitionKey(user.email));
+            }
+            else
+            {
+                // Use existing banner if not uploading a new one
+                bannerKey = user.Banner;
+            }
+
+            // Return keys and URLs for whatever was uploaded OR existing values
+            return new UserImageUploadResult
+            {
+                ProfileKey = profileKey,
+                ProfileUrl = profileKey != null ? GetPhotoUrl(profileKey) : null,
+                BannerKey = bannerKey,
+                BannerUrl = bannerKey != null ? GetPhotoUrl(bannerKey) : null,
+                DateCreated = DateTime.UtcNow
             };
         }
 
@@ -264,22 +316,22 @@ namespace StorageWebAppBackend.Services
         {
             await _usersContainer.UpsertItemAsync(user, new PartitionKey(user.email));
         }
-        public async Task<bool> FileExistsInR2Async(string key)
+        public async Task<GetObjectMetadataResponse?> GetKeyFromR2Async(string fileName)
         {
             try
             {
                 var request = new Amazon.S3.Model.GetObjectMetadataRequest
                 {
                     BucketName = _r2BucketName,
-                    Key = Uri.EscapeDataString(key.Replace(" ", "_"))
+                    Key = Uri.EscapeDataString(fileName.Replace(" ", "_"))
                 };
 
                 var response = await _s3Client.GetObjectMetadataAsync(request);
-                return true; // file exists
+                return response;
             }
             catch (Amazon.S3.AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                return false; // file does not exist
+                return null; // return null if file not found
             }
         }
     }
