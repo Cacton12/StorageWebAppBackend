@@ -21,6 +21,7 @@ namespace StorageWebAppBackend.Controllers
         public async Task<IActionResult> SendFeedback([FromBody] FeedbackRequest request)
         {
             Console.WriteLine("Received feedback request");
+
             if (!ModelState.IsValid)
             {
                 return BadRequest(new
@@ -41,6 +42,7 @@ namespace StorageWebAppBackend.Controllers
 
                 if (result)
                 {
+                    Console.WriteLine("Feedback email sent successfully.");
                     return Ok(new
                     {
                         success = true,
@@ -49,19 +51,31 @@ namespace StorageWebAppBackend.Controllers
                 }
                 else
                 {
+                    Console.WriteLine("Feedback email failed to send.");
                     return StatusCode(500, new
                     {
                         success = false,
-                        error = "Failed to send feedback. Please try again later."
+                        error = "Failed to send feedback. Check logs for details."
                     });
                 }
             }
-            catch (Exception ex)
+            catch (HttpRequestException httpEx)
             {
+                Console.WriteLine($"MailerSend HTTP error: {httpEx.Message}");
                 return StatusCode(500, new
                 {
                     success = false,
-                    error = "An error occurred while sending feedback",
+                    error = "MailerSend API request failed",
+                    details = httpEx.Message
+                });
+            }
+            catch (System.Exception ex)
+            {
+                Console.WriteLine($"Unexpected error sending feedback: {ex.Message}");
+                return StatusCode(500, new
+                {
+                    success = false,
+                    error = "An unexpected error occurred while sending feedback",
                     details = ex.Message
                 });
             }

@@ -1,6 +1,8 @@
 ﻿using System;
-using System.Net;
-using System.Net.Mail;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 
@@ -8,31 +10,36 @@ namespace StorageWebAppBackend.Services
 {
     public class EmailService
     {
+        private readonly string _apiKey;
         private readonly string _fromEmail;
-        private readonly string _password;
         private readonly string _toEmail;
+        private readonly HttpClient _httpClient;
 
         public EmailService(IConfiguration configuration)
         {
-            _fromEmail = configuration["GMAIL_EMAIL"]
-                ?? throw new ArgumentNullException("GMAIL_EMAIL");
-            _password = configuration["GMAIL_PASSWORD"]
-                ?? throw new ArgumentNullException("GMAIL_PASSWORD");
-            _toEmail = configuration["GMAIL_TO_EMAIL"]
-                ?? throw new ArgumentNullException("GMAIL_TO_EMAIL");
+            _apiKey = configuration["MAILERSEND_API_KEY"]
+                ?? throw new ArgumentNullException("MAILERSEND_API_KEY");
+
+            // Use your verified test domain for from.email
+            _fromEmail = configuration["MAILERSEND_FROM_EMAIL"]
+                ?? "feedback@test-r6ke4n1e029gon12.mlsender.net";
+
+            _toEmail = configuration["MAILERSEND_TO_EMAIL"]
+                ?? throw new ArgumentNullException("MAILERSEND_TO_EMAIL");
+
+            _httpClient = new HttpClient
+            {
+                BaseAddress = new Uri("https://api.mailersend.com/v1/email")
+            };
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _apiKey);
         }
 
         public async Task<bool> SendFeedbackEmailAsync(string senderName, string senderEmail, string message)
         {
             try
             {
-                var mail = new MailMessage();
-                mail.From = new MailAddress(_fromEmail, "StorageWebApp Feedback");
-                mail.To.Add(_toEmail);
-                mail.Subject = $"New Feedback from {senderName}";
-                mail.IsBodyHtml = true;
-
-                mail.Body = $@"
+                var emailBody = $@"
                 <html>
                 <body style=""font-family: Arial, sans-serif; background-color: #f9f9f9; padding: 20px;"">
                     <div style=""max-width: 600px; margin: auto; background-color: #ffffff; border-radius: 8px; padding: 20px; box-shadow: 0 0 10px rgba(0,0,0,0.1);"">
@@ -52,15 +59,29 @@ namespace StorageWebAppBackend.Services
                 </body>
                 </html>";
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                var payload = new
                 {
-                    Credentials = new NetworkCredential(_fromEmail, _password),
-                    EnableSsl = true
+                    from = new { email = _fromEmail, name = "StorageWebApp Feedback" },
+                    to = new[] { new { email = _toEmail } },
+                    subject = $"New Feedback from {senderName}",
+                    html = emailBody
                 };
 
-                await smtp.SendMailAsync(mail);
-                Console.WriteLine("Email sent successfully!");
-                return true;
+                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+                var response = await _httpClient.PostAsync("", content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine("Email sent successfully!");
+                    return true;
+                }
+                else
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Failed to send email: {response.StatusCode} - {error}");
+                    return false;
+                }
             }
             catch (Exception ex)
             {
